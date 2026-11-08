@@ -1,0 +1,18 @@
+{
+  "schema_version": "freedom.guild-template/v1",
+  "producer": "FreeTWAI/freedom-platform",
+  "producer_commit": "5d26d0d929fba6e1f6da8329f12004dfb48baeac",
+  "producer_dirty": false,
+  "template_files": {
+    "scripts/build.mjs": "c0f2b0b2813d036e05177198848ba0529858b717c0f8659e7ab74dc984a6c6e1",
+    "scripts/serve.mjs": "46ab997ca5b2dd40781f3655a2eeffbd6439d4cc4e2f92596b193c03ed7e7c8a",
+    "src/site.js": "0cd9c014f4bd0bc2d19bff0d20cae8539b80d8037060cb9b235d8eb94d4aa3f4",
+    "src/style.css": "a5d1fb264f2d3fc7c4686012f567733fadd7b8017ab5e7103c6333e0fdb694d7",
+    "tests/workspace.test.mjs": "1b95e6885be54916100bf5c42c2b1749d81e69b4368baccd6cde1f1c1cf64fcb",
+    "tests/browser/workspace.spec.mjs": "2963eb24156acdce9d096957dca34fdd8150f94b38f960531ff5aa89d4268366",
+    "playwright.config.mjs": "fdccc948f434623e580008b8693b0f0573241d6ed1f003bd5f30cb8b590b8726",
+    ".github/workflows/publish.yml": "6dfebe4b7f2a683a825a3eb1b06e6e623b6cd2d758f0c881ee687f0d044e9974",
+    "package.json": "1c31931e2df020ea30984efe6111273b1d5fed836cb75a76ca6ff22d72aebc50",
+    "package-lock.json": "cee4531e931e0c6df6291c3151f8bdca2b2a92276624ee4c1d38b128ee46fecf"
+  }
+}

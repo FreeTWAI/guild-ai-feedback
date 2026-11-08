@@ -1,0 +1,26 @@
+{
+  "schema_version": "freedom.guild-workspace/v1",
+  "guild_key": "guild_custom_032fd02e754549e9b1e056e2b95b8d50",
+  "name": "AI 體驗回饋公會",
+  "repository": "FreeTWAI/guild-ai-feedback",
+  "headline": "動手用過，再把感受說清楚",
+  "purpose": "安裝技能書、動手玩玩看，把真實感受回饋給開發者；想衝就衝，也可以躺平。",
+  "outcome": "一份可重現的工具體驗回饋",
+  "steps": [
+    {
+      "title": "挑一本想試玩的技能書",
+      "detail": "從公會技能書找到方法與原始工具。",
+      "action": "skills"
+    },
+    {
+      "title": "照步驟操作並記下卡住的地方",
+      "detail": "選擇適合的工具，接續已有的設定與操作。",
+      "action": "tools"
+    },
+    {
+      "title": "保存操作情境與具體建議",
+      "detail": "在你的工作區保存筆記與成果，之後可以繼續。",
+      "action": "work"
+    }
+  ]
+}

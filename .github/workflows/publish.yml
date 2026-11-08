@@ -1,0 +1,95 @@
+name: Verify and publish workspace
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: 'Optional exact main-history commit to publish or restore'
+        type: string
+        required: false
+permissions:
+  contents: read
+concurrency:
+  group: guild-pages-${{ github.event_name == 'pull_request' && github.ref || 'main' }}
+  cancel-in-progress: false
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    outputs:
+      source_sha: ${{ steps.source.outputs.sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Select reviewed source
+        id: source
+        env:
+          REQUESTED_SHA: ${{ inputs.source_sha }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_REF: ${{ github.ref }}
+        run: |
+          if [[ "$EVENT_NAME" == workflow_dispatch && "$EVENT_REF" != refs/heads/main ]]; then exit 1; fi
+          if [[ -n "$REQUESTED_SHA" ]]; then
+            [[ "$REQUESTED_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
+            git merge-base --is-ancestor "$REQUESTED_SHA" origin/main
+            git checkout --detach "$REQUESTED_SHA"
+          fi
+          echo "GUILD_SOURCE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm test
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:browser
+      - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        with:
+          path: dist
+  deploy:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.publish.outputs.page_url }}
+    steps:
+      - name: Publish verified workspace
+        id: publish
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e
+      - name: Verify the public release
+        env:
+          PUBLISHED_URL: ${{ steps.publish.outputs.page_url }}
+          EXPECTED_SHA: ${{ needs.verify.outputs.source_sha }}
+        run: |
+          node --input-type=module <<'JS'
+          const repository = process.env.GITHUB_REPOSITORY;
+          const expectedUrl = `https://freetwai.github.io/${repository.split('/')[1]}/`;
+          if (process.env.PUBLISHED_URL !== expectedUrl || !/^[a-f0-9]{40}$/.test(process.env.EXPECTED_SHA)) throw new Error('Unexpected release identity');
+          let confirmed = false;
+          for (let attempt = 0; attempt < 12; attempt++) {
+            try {
+              const response = await fetch(`${expectedUrl}release.json?source=${process.env.EXPECTED_SHA}`, {redirect: 'error', signal: AbortSignal.timeout(10000)});
+              const text = await response.text();
+              if (response.ok && text.length < 4096) {
+                const release = JSON.parse(text);
+                confirmed = release.repository === repository && release.source_sha === process.env.EXPECTED_SHA && release.schema_version === 'freedom.guild-release/v1' && release.bridge === 'freedom.guild-launchpad/v1';
+              }
+            } catch {}
+            if (confirmed) break;
+            await new Promise(resolve => setTimeout(resolve, 10000));
+          }
+          if (!confirmed) throw new Error('Published source could not be confirmed; inspect Pages before retrying');
+          console.log(`Confirmed ${repository}@${process.env.EXPECTED_SHA}`);
+          JS
