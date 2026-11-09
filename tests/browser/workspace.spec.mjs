@@ -41,52 +41,74 @@ test('sandbox bridge uses the pinned protocol and sends navigation without priva
   expect(new URL(page.url()).pathname).toBe('/__guild-fixture');
 });
 
-test('sandbox bridge ignores messages from untrusted origins', async ({page}) => {
+async function mountObservedBridge(page, parentOrigin) {
   const siteUrl = `https://freetwai.github.io/${workspace.repository.split('/')[1]}/`;
-  await page.route('https://attacker.com/__guild-fixture', route => route.fulfill({contentType: 'text/html', body: '<!doctype html><html><body><main></main></body></html>'}));
+  const fixtureUrl = `${parentOrigin}/__guild-fixture-security`;
+  await page.route(fixtureUrl, route => route.fulfill({contentType: 'text/html', body: '<!doctype html><html><body><main></main></body></html>'}));
   await page.route(`${siteUrl}**`, async route => {
     const file = route.request().url().slice(siteUrl.length) || 'index.html';
     const types = {'index.html': 'text/html', 'site.js': 'text/javascript', 'style.css': 'text/css', 'brand.png': 'image/png'};
     if (!Object.hasOwn(types, file)) return route.abort();
+    // A slow iframe must not make a negative assertion pass before init is sent.
+    if (file === 'index.html') await new Promise(resolve => setTimeout(resolve, 350));
     await route.fulfill({contentType: types[file], body: await readFile(new URL(`../../dist/${file}`, import.meta.url)), headers: {'access-control-allow-origin': '*'}});
   });
-  await page.goto('https://attacker.com/__guild-fixture');
-  await page.evaluate(({guildKey, siteUrl}) => {
-    const channel = 'b5be8af2-2e86-4208-b488-c7c9f1b84512';
-    window.messages = [];
+  await page.goto(fixtureUrl);
+  await page.evaluate(async siteUrl => {
+    window.messages = []; window.observedInits = []; window.initSent = 0;
     const frame = document.createElement('iframe');
     frame.title = 'workspace'; frame.setAttribute('sandbox', 'allow-scripts');
-    window.addEventListener('message', event => {if (event.source === frame.contentWindow && event.origin === 'null') window.messages.push(event.data);});
-    frame.onload = () => frame.contentWindow.postMessage({protocol: 'freedom.guild-launchpad/v1', type: 'init', channel, guildKey, theme: 'light', actions: ['work', 'skills', 'tools', 'information']}, '*');
+    window.addEventListener('message', event => {
+      if (event.source !== frame.contentWindow || event.origin !== 'null') return;
+      if (event.data?.test === 'init-observed') window.observedInits.push(event.data);
+      else window.messages.push(event.data);
+    });
+    const loaded = new Promise(resolve => {frame.onload = resolve;});
     frame.src = siteUrl; document.querySelector('main').append(frame);
-  }, {guildKey: workspace.guild_key, siteUrl});
-  await page.waitForTimeout(200);
+    await loaded;
+  }, siteUrl);
+  const frame = page.frameLocator('iframe');
+  await expect(frame.getByRole('heading', {level: 2, name: workspace.headline, exact: true})).toHaveText(workspace.headline);
+  await frame.locator('html').evaluate(() => {
+    // Registered after the real bridge: its replies arrive before this receipt.
+    window.addEventListener('message', event => {
+      if (event.source === window.parent) window.parent.postMessage({test: 'init-observed', origin: event.origin, payload: event.data}, '*');
+    });
+  });
+}
+
+async function sendObservedInit(page, parentOrigin, payload) {
+  const sent = await page.evaluate(payload => {
+    document.querySelector('iframe').contentWindow.postMessage(payload, '*');
+    return ++window.initSent;
+  }, payload);
+  await expect.poll(() => page.evaluate(() => window.observedInits.length)).toBe(sent);
+  expect(await page.evaluate(() => window.observedInits.at(-1))).toEqual({test: 'init-observed', origin: parentOrigin, payload});
+}
+
+const validInit = {protocol: 'freedom.guild-launchpad/v1', type: 'init', channel: 'b5be8af2-2e86-4208-b488-c7c9f1b84512', guildKey: workspace.guild_key, theme: 'light', actions: ['work', 'skills', 'tools', 'information']};
+const expectedReady = {protocol: validInit.protocol, type: 'ready', channel: validInit.channel, guildKey: workspace.guild_key};
+
+test('sandbox bridge ignores messages from untrusted origins', async ({page}) => {
+  await mountObservedBridge(page, 'https://freetwai.com');
+  await sendObservedInit(page, 'https://freetwai.com', validInit);
+  expect(await page.evaluate(() => window.messages.filter(message => message.type === 'ready'))).toEqual([expectedReady]);
+
+  await mountObservedBridge(page, 'https://attacker.com');
+  await sendObservedInit(page, 'https://attacker.com', validInit);
   expect(await page.evaluate(() => window.messages)).toEqual([]);
 });
 
 test('sandbox bridge ignores invalid message structures', async ({page}) => {
-  const siteUrl = `https://freetwai.github.io/${workspace.repository.split('/')[1]}/`;
-  await page.route('https://freetwai.com/__guild-fixture-invalid', route => route.fulfill({contentType: 'text/html', body: '<!doctype html><html><body><main></main></body></html>'}));
-  await page.route(`${siteUrl}**`, async route => {
-    const file = route.request().url().slice(siteUrl.length) || 'index.html';
-    const types = {'index.html': 'text/html', 'site.js': 'text/javascript', 'style.css': 'text/css', 'brand.png': 'image/png'};
-    if (!Object.hasOwn(types, file)) return route.abort();
-    await route.fulfill({contentType: types[file], body: await readFile(new URL(`../../dist/${file}`, import.meta.url)), headers: {'access-control-allow-origin': '*'}});
-  });
-  await page.goto('https://freetwai.com/__guild-fixture-invalid');
-  await page.evaluate(({guildKey, siteUrl}) => {
-    const channel = 'b5be8af2-2e86-4208-b488-c7c9f1b84512';
-    window.messages = [];
-    const frame = document.createElement('iframe');
-    frame.title = 'workspace'; frame.setAttribute('sandbox', 'allow-scripts');
-    window.addEventListener('message', event => {if (event.source === frame.contentWindow && event.origin === 'null') window.messages.push(event.data);});
-    frame.onload = () => {
-      frame.contentWindow.postMessage({protocol: 'hacker/v1', type: 'init', channel, guildKey, theme: 'light', actions: ['work']}, '*');
-      frame.contentWindow.postMessage({protocol: 'freedom.guild-launchpad/v1', type: 'init', channel, guildKey, theme: 'light', actions: ['work'], maliciousKey: 1}, '*');
-      frame.contentWindow.postMessage({protocol: 'freedom.guild-launchpad/v1', type: 'init', channel: 'invalid', guildKey, theme: 'light', actions: ['work']}, '*');
-    };
-    frame.src = siteUrl; document.querySelector('main').append(frame);
-  }, {guildKey: workspace.guild_key, siteUrl});
-  await page.waitForTimeout(200);
-  expect(await page.evaluate(() => window.messages)).toEqual([]);
+  await mountObservedBridge(page, 'https://freetwai.com');
+  for (const payload of [
+    {...validInit, protocol: 'hacker/v1'},
+    {...validInit, maliciousKey: 1},
+    {...validInit, channel: 'invalid'},
+  ]) {
+    await sendObservedInit(page, 'https://freetwai.com', payload);
+    expect(await page.evaluate(() => window.messages)).toEqual([]);
+  }
+  await sendObservedInit(page, 'https://freetwai.com', validInit);
+  expect(await page.evaluate(() => window.messages.filter(message => message.type === 'ready'))).toEqual([expectedReady]);
 });
